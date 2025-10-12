@@ -259,3 +259,145 @@ except Exception:
     print("\n(Resumen guardado en CSV)")
     with open(csv_resumen_path, "r", encoding="utf-8") as fh:
         print(fh.read())
+
+# ================================================================
+# BÚSQUEDA ÓPTIMA DE α: rejilla, dorada, y Newton-Raphson (1D)
+# No modifica tus métodos: añade un nuevo ascenso con selector de modo
+# ================================================================
+
+# ---- helper: función sobre la línea ----
+def _phi(alpha, xk, g):
+    # φ(α) = f(xk + α g)
+    return f(*(xk + alpha * g))
+
+# ---- 1) Rejilla fina (máximo) ----
+def line_search_grid(xk, g, alpha_max=1.0, n=100):
+    alphas = np.linspace(0.0, alpha_max, n)
+    vals = [_phi(a, xk, g) for a in alphas]
+    return float(alphas[int(np.argmax(vals))])
+
+# ---- 2) Búsqueda dorada (máximo) ----
+def line_search_golden(xk, g, a=0.0, b=1.0, tol=1e-5, max_iter=200):
+    # Maximización ⇔ minimizar -φ(α)
+    phi = lambda A: _phi(A, xk, g)
+    gr = (np.sqrt(5) - 1) / 2  # razón dorada conjugada
+    c = b - gr * (b - a)
+    d = a + gr * (b - a)
+    fc = phi(c)
+    fd = phi(d)
+    it = 0
+    while (b - a) > tol and it < max_iter:
+        if fc < fd:   # queremos el máximo
+            a = c
+            c = d
+            fc = fd
+            d = a + gr * (b - a)
+            fd = phi(d)
+        else:
+            b = d
+            d = c
+            fd = fc
+            c = b - gr * (b - a)
+            fc = phi(c)
+        it += 1
+    return float((a + b) / 2)
+
+# ---- 3) Newton–Raphson (máximo) con derivadas numéricas ----
+def line_search_newton(xk, g, alpha0=0.1, alpha_max=1.0, tol=1e-6, max_iter=50):
+    # φ'(α) y φ''(α) por diferencias finitas centradas
+    def dphi(a, h=1e-4):
+        return (_phi(a + h, xk, g) - _phi(a - h, xk, g)) / (2*h)
+    def ddphi(a, h=1e-4):
+        return (_phi(a + h, xk, g) - 2*_phi(a, xk, g) + _phi(a - h, xk, g)) / (h*h)
+
+    a = float(np.clip(alpha0, 0.0, alpha_max))
+    for _ in range(max_iter):
+        g1 = dphi(a)
+        g2 = ddphi(a)
+        if abs(g2) < 1e-12:
+            break  # evitar división por cero -> fallback fuera (grid)
+        a_new = a - g1 / g2
+        # proyectar al intervalo [0, alpha_max]
+        a_new = float(np.clip(a_new, 0.0, alpha_max))
+        if abs(a_new - a) < tol:
+            return a_new
+        a = a_new
+    # si no converge, usar una rejilla fina como respaldo
+    return line_search_grid(xk, g, alpha_max=alpha_max, n=100)
+
+# ---- Ascenso con selector de búsqueda lineal de α ----
+def ascenso_paso_optimo_ls(
+    x0, tol=1e-4, max_iter=200, mode="golden",
+    alpha_max=1.0, n_grid=100, newton_alpha0=0.1
+):
+    """
+    mode: 'grid' | 'golden' | 'newton'
+    """
+    xk = np.array(x0, dtype=float)
+    trayectoria = [xk.copy()]
+    valores_f = [f(*xk)]
+    alphas_usados = []
+
+    for _ in range(max_iter):
+        g = grad_f(*xk)
+        if np.linalg.norm(g) < tol:
+            break
+
+        if mode == "grid":
+            ak = line_search_grid(xk, g, alpha_max=alpha_max, n=n_grid)
+        elif mode == "golden":
+            ak = line_search_golden(xk, g, a=0.0, b=alpha_max, tol=1e-5, max_iter=200)
+        elif mode == "newton":
+            ak = line_search_newton(xk, g, alpha0=newton_alpha0, alpha_max=alpha_max, tol=1e-6, max_iter=50)
+        else:
+            raise ValueError("mode debe ser 'grid', 'golden' o 'newton'.")
+
+        alphas_usados.append(ak)
+        xk = xk + ak * g
+        trayectoria.append(xk.copy())
+        valores_f.append(f(*xk))
+
+    return np.array(trayectoria), np.array(valores_f), np.array(alphas_usados)
+
+
+x0 = [-3.0, 3.0]
+
+# Rejilla fina (lo que ya tenías)
+tray_g, val_g, a_g = ascenso_paso_optimo_ls(x0, mode="grid",   alpha_max=1.0, n_grid=200)
+
+# Búsqueda dorada
+tray_d, val_d, a_d = ascenso_paso_optimo_ls(x0, mode="golden", alpha_max=1.0)
+
+# Newton–Raphson 1D (derivadas numéricas)
+tray_n, val_n, a_n = ascenso_paso_optimo_ls(x0, mode="newton", alpha_max=1.0, newton_alpha0=0.1)
+
+
+# ===================== PROBAR BÚSQUEDA ÓPTIMA ====================
+# Elige el modo: "grid" (rejilla), "golden" (búsqueda dorada), "newton" (NR 1D)
+MODE = "newton"          # <- cambia aquí
+x0_test = [-3.0, 3.0]    # <- cambia el punto inicial si quieres
+
+tray_b, val_b, alphas_b = ascenso_paso_optimo_ls(
+    x0_test,
+    mode=MODE,
+    alpha_max=1.0,       # rango superior para α
+    n_grid=200,          # solo aplica a mode="grid"
+    newton_alpha0=0.1,   # solo aplica a mode="newton"
+    tol=1e-4,
+    max_iter=200
+)
+
+# Resumen por consola
+print(f"\n=== BÚSQUEDA ÓPTIMA con mode='{MODE}' ===")
+print(f"Punto final: ({tray_b[-1,0]:.6f}, {tray_b[-1,1]:.6f})  f = {val_b[-1]:.6f}")
+print("Primeras α_k:", np.round(alphas_b[:10], 4))
+
+# Tabla de iteraciones (usa tu función existente)
+tabla_iteraciones(tray_b, val_b, alphas=alphas_b, max_rows=15, titulo=f"Óptimo ({MODE})")
+
+# Curvas de nivel SOLO con la trayectoria del método óptimo
+graficar_contornos(tray_b, tray_opt=None, xlim=(-6,6), ylim=(-6,6), niveles=30, primeros_n=10)
+
+# Superficie 3D con la ruta (recortada a la ventana)
+graficar_superficie_3d_windowed(tray=tray_b, xlim=(-6,6), ylim=(-6,6),
+                                titulo=f"Superficie 3D + Ruta (Óptimo: {MODE})")
