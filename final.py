@@ -1,5 +1,6 @@
 # UNIVERSIDAD DEL VALLE DE GUATEMALA 
 # EDGAR SAMUEL CHAVARRIA CASTAÑON 22055
+# ESTEBAN EDUARDO SOLORZANO MELGAR 22025    
 
 # ------------------------------------------------------- LIBRERIAS ------------------------------------------------------------------------------
 import numpy as np
